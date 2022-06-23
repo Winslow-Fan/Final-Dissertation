@@ -1,6 +1,7 @@
 # Final-Dissertation
 MS Dissertation in UoS, UK.
 ## v4.0 Description
+Rotation first translation next.
 ### Running
 First add following commands to `/gym/envs/__init__.py`
 
