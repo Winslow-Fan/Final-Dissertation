@@ -12,12 +12,6 @@ import torch.optim as optim
 from torch.distributions import Normal
 from tensorboardX import SummaryWriter
 
-'''
-Implementation of Deep Deterministic Policy Gradients (DDPG) with pytorch 
-riginal paper: https://arxiv.org/abs/1509.02971
-Not the author's implementation !
-'''
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='train', type=str) # mode = 'train' or 'test'
 # OpenAI gym environment name, # ['BipedalWalker-v2', 'Pendulum-v0'] or any continuous environment
@@ -31,7 +25,7 @@ parser.add_argument('--test_iteration', default=10, type=int)
 parser.add_argument('--learning_rate', default=1e-4, type=float)
 parser.add_argument('--gamma', default=0.99, type=int) # discounted factor
 parser.add_argument('--capacity', default=1000000, type=int) # replay buffer size
-parser.add_argument('--batch_size', default=100, type=int) # mini batch size
+parser.add_argument('--batch_size', default=128, type=int) # mini batch size
 parser.add_argument('--seed', default=False, type=bool)
 parser.add_argument('--random_seed', default=9527, type=int)
 # optional parameters
@@ -42,9 +36,11 @@ parser.add_argument('--log_interval', default=50, type=int) #
 parser.add_argument('--load', default=False, type=bool) # load model
 parser.add_argument('--render_interval', default=100, type=int) # after render_interval, the env.render() will work
 parser.add_argument('--exploration_noise', default=0.1, type=float)
-parser.add_argument('--max_episode', default=100000, type=int) # num of games
+parser.add_argument('--max_episode', default=10000, type=int) # num of games
 parser.add_argument('--print_log', default=5, type=int)
 parser.add_argument('--update_iteration', default=200, type=int)
+parser.add_argument('--print', default=False, type=bool)
+
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -62,6 +58,8 @@ max_action = float(env.action_space.high[0])
 min_Val = torch.tensor(1e-7).float().to(device) # min value
 
 directory = './exp' + script_name + args.env_name +'./'
+if not os.path.isdir(directory):
+    os.mkdir(directory)
 
 class Replay_buffer():
     '''
@@ -101,8 +99,11 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
 
         self.l1 = nn.Linear(state_dim, 400)
+        self.l1.weight.data.normal_(0, 0.1)
         self.l2 = nn.Linear(400, 300)
+        self.l2.weight.data.normal_(0, 0.1)
         self.l3 = nn.Linear(300, action_dim)
+        self.l3.weight.data.normal_(0, 0.1)
 
         self.max_action = max_action
 
@@ -118,8 +119,11 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         self.l1 = nn.Linear(state_dim + action_dim, 400)
+        self.l1.weight.data.normal_(0, 0.1)
         self.l2 = nn.Linear(400 , 300)
+        self.l2.weight.data.normal_(0, 0.1)
         self.l3 = nn.Linear(300, 1)
+        self.l3.weight.data.normal_(0, 0.1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat([x, u], 1)))
@@ -198,9 +202,9 @@ class DDPG(object):
     def save(self):
         torch.save(self.actor.state_dict(), directory + 'actor.pth')
         torch.save(self.critic.state_dict(), directory + 'critic.pth')
-        # print("====================================")
-        # print("Model has been saved...")
-        # print("====================================")
+        print("====================================")
+        print("Model has been saved...")
+        print("====================================")
 
     def load(self):
         self.actor.load_state_dict(torch.load(directory + 'actor.pth'))
@@ -220,7 +224,7 @@ def main():
                 action = agent.select_action(state)
                 next_state, reward, done, info = env.step(np.float32(action))
                 ep_r += reward
-                env.render()
+                # env.render()
                 if done or t >= args.max_length_of_trajectory:
                     print("Ep_i \t{}, the ep_r is \t{:0.2f}, the step is \t{}".format(i, ep_r, t))
                     ep_r = 0
@@ -234,22 +238,49 @@ def main():
             total_reward = 0
             step =0
             state = env.reset()
+            init_state = state
+
             for t in count():
                 action = agent.select_action(state)
                 action = (action + np.random.normal(0, args.exploration_noise, size=env.action_space.shape[0])).clip(
                     env.action_space.low, env.action_space.high)
 
                 next_state, reward, done, info = env.step(action)
-                if args.render and i >= args.render_interval : env.render()
-                agent.replay_buffer.push((state, next_state, action, reward, np.float(done)))
+                next_position = next_state[3]
+                position = state[3]
+                next_error = next_state[2]
+                error = state[2]
+                if abs(next_error) < abs(error):
+                    reward_error = 1 / (step + 1) # (abs(error)-abs(next_error))/i
+                    if abs(error) <= 3:
+                        reward_error = 10
+                else:
+                    reward_error = -1
+                if position < next_position:
+                    reward_pos = 1/ (step + 1)
+                    if position > 0.8 * env.img_height:
+                        reward_pos = 10
+                else:
+                    reward_pos = -1
 
+                reward = reward_pos + reward_error
+
+                # if args.render and i >= args.render_interval : env.render()
+                agent.replay_buffer.push((state, next_state, action, reward, np.float64(done)))
+                if args.print:
+                    print(f"Step {t}")
+                    print(f"robot state: {env.robot}; target state: {env.target};")
+                    print(f"state: {state}; next state: {next_state}; action: {action}")
                 state = next_state
+
+
                 if done:
                     break
                 step += 1
                 total_reward += reward
             total_step += step+1
             print("Total T:{} Episode: \t{} Total Reward: \t{:0.2f}".format(total_step, i, total_reward))
+            print(f"Init state: {init_state}; Final state: {state}")
             agent.update()
            # "Total T: %d Episode Num: %d Episode T: %d Reward: %f
 

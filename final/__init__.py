@@ -1,4 +1,0 @@
-from gym.envs.final.DiscreteRobotInterception import DiscreteRobotMovingEnv
-from gym.envs.final.TwoWheelRobotInterception import TwoWheelRobotMovingEnv
-from gym.envs.final.DiscreteRobotTranslation import DiscreteRobotTranslationEnv
-from gym.envs.final.ContinuousRobotInterception import TwoWheelRobotContinuousMovingEnv
